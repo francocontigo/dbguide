@@ -1,7 +1,7 @@
 [project]
 name = "dbguide"
 version = "0.1.0"
-description = "Add your description here"
+description = "dbguide: An AI-powered SQL assistant for your databases."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -13,4 +13,10 @@ dependencies = [
     "sentence-transformers>=5.2.0",
     "sqlglot>=28.5.0",
     "streamlit>=1.52.2",
+    "openai>=1.0.0",
+    "transformers>=4.45.0",
+    "datasets>=3.0.0",
+    "peft>=0.13.0",
+    "accelerate>=1.0.0",
+    "bitsandbytes>=0.43.0",
 ]

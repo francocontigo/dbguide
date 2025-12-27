@@ -11,3 +11,12 @@ wheels/
 
 # Enviroments
 .env
+
+# Corpus: ignorar tudo, exceto arquivos de exemplo
+dbguide/corpus/**/*.md
+!dbguide/corpus/pattern_cards/pattern_example_basic.md
+!dbguide/corpus/query_cards/query_example_basic.md
+
+# Dados de treino LoRA: versionar somente arquivos de exemplo
+data/lora_training/
+!data/lora_training/train_example.jsonl
