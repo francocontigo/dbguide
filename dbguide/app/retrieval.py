@@ -30,7 +30,7 @@ def read_markdown_docs(corpus_dir: str = "corpus") -> List[Doc]:
         meta: Dict[str, Any] = {}
         body = raw
 
-        # Parse frontmatter YAML simples (--- \n ... \n ---)
+        # Parse simple YAML frontmatter (--- \n ... \n ---)
         if raw.startswith("---"):
             parts = raw.split("---", 2)
             if len(parts) >= 3:
@@ -47,7 +47,7 @@ def read_markdown_docs(corpus_dir: str = "corpus") -> List[Doc]:
 
 
 def tokenize(text: str) -> List[str]:
-    # tokenização simples (ok pro MVP)
+    # Simple tokenization suitable for the MVP
     text = text.replace("```", " ").replace("\n", " ")
     parts = [p.strip().lower() for p in text.split()]
     return [p for p in parts if len(p) >= 3]
@@ -100,23 +100,25 @@ def hybrid_search(
     top_k: int = 6,
     alpha: float = 0.55,
 ) -> List[Dict]:
+    """Perform a hybrid vector + BM25 search.
+
+    ``alpha`` controls the relative weight of the vector score (0..1).
+    ``1 - alpha`` is the weight given to the BM25 score.
     """
-    alpha = peso do vetor (0..1). (1-alpha) = peso do bm25.
-    """
-    # 1) Vetorial (Chroma)
+    # 1) Vector-based search (Chroma)
     v = col.query(query_texts=[query], n_results=top_k)
     vec_ids = v["ids"][0]
-    vec_dist = v["distances"][0]  # distância (menor = melhor)
+    vec_dist = v["distances"][0]  # distance (smaller is better)
 
-    # transforma distância em score (maior = melhor)
+    # Convert distance to a score (larger is better)
     vec_score = {i: 1.0 / (1e-6 + float(d)) for i, d in zip(vec_ids, vec_dist)}
 
-    # 2) BM25
+    # 2) BM25 keyword-based score
     qtok = tokenize(query)
     bm25_scores = bm25.get_scores(qtok)
     bm_score = {docs[i].id: float(bm25_scores[i]) for i in range(len(docs))}
 
-    # 3) mistura
+    # 3) Combine scores from both methods
     all_ids = set(vec_score.keys()) | set(bm_score.keys())
     merged = []
     for _id in all_ids:

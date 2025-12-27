@@ -1,16 +1,16 @@
-"""Script simples para treino LoRA em cima do Mistral 7B Instruct.
+"""Simple LoRA training script on top of Mistral 7B Instruct.
 
-Requisitos (pyproject já atualizado):
+Requirements (already listed in pyproject):
 - transformers
 - datasets
 - peft
 - accelerate
-- bitsandbytes (para quantização 4/8 bits, opcional mas recomendado)
+- bitsandbytes (for 4/8-bit quantization, optional but recommended)
 
-IMPORTANTE:
-- Treinar Mistral 7B exige GPU com bastante VRAM. Em máquina fraca, reduza o
-  `per_device_train_batch_size` ou use um modelo menor.
-- Este script é um ponto de partida; ajuste hiperparâmetros para seu caso.
+IMPORTANT:
+- Training Mistral 7B requires a GPU with substantial VRAM. On weaker
+	machines, reduce `per_device_train_batch_size` or use a smaller model.
+- This script is a starting point; adjust hyperparameters for your use case.
 """
 
 from __future__ import annotations
@@ -50,10 +50,10 @@ class LoraTrainConfig:
 
 
 def load_jsonl_dataset(path: Path) -> Dataset:
-	"""Carrega um dataset JSONL local.
+	"""Load a local JSONL dataset.
 
-	Formato esperado de cada linha JSON:
-		{"instruction": "pergunta em linguagem natural", "response": "SQL alvo"}
+	Expected format for each JSON line:
+		{"instruction": "natural language question", "response": "target SQL"}
 	"""
 
 	if not path.exists():
@@ -67,15 +67,12 @@ def load_jsonl_dataset(path: Path) -> Dataset:
 
 
 def build_prompt(example: Dict[str, str]) -> str:
-	"""Monta um prompt estilo instrução → resposta.
-
-	Você pode customizar para refletir o estilo do DBGuide (EXPLICACAO/CHECKS etc.).
-	"""
+	"""Build an instruction-style prompt for the model."""
 
 	instr = example.get("instruction", "").strip()
 	resp = example.get("response", "").strip()
 
-	# Formato simples estilo chat de instrução
+	# Simple instruction-style chat format
 	prompt = (
 		"<s>[INST] Você é um assistente especializado em SQL. "
 		"Gere apenas uma query SQL de leitura (SELECT) para o pedido abaixo.\n\n"
@@ -97,10 +94,10 @@ def tokenize_dataset(ds: Dataset, tokenizer: AutoTokenizer) -> Dataset:
 def train_lora(cfg: LoraTrainConfig) -> None:
 	cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
-	print(f"Carregando dataset de {cfg.data_path}...")
+	print(f"Loading dataset from {cfg.data_path}...")
 	raw_ds = load_jsonl_dataset(cfg.data_path)
 
-	print(f"Carregando tokenizer e modelo base: {cfg.base_model}...")
+	print(f"Loading tokenizer and base model: {cfg.base_model}...")
 	tokenizer = AutoTokenizer.from_pretrained(cfg.base_model)
 	if tokenizer.pad_token is None:
 		tokenizer.pad_token = tokenizer.eos_token
@@ -111,7 +108,7 @@ def train_lora(cfg: LoraTrainConfig) -> None:
 		device_map="auto",
 	)
 
-	print("Aplicando configuração LoRA...")
+	print("Applying LoRA configuration...")
 	lora_cfg = LoraConfig(
 		r=cfg.lora_r,
 		lora_alpha=cfg.lora_alpha,
@@ -121,7 +118,7 @@ def train_lora(cfg: LoraTrainConfig) -> None:
 	)
 	model = get_peft_model(model, lora_cfg)
 
-	print("Tokenizando dataset...")
+	print("Tokenizing dataset...")
 	tokenized_ds = tokenize_dataset(raw_ds, tokenizer)
 
 	data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
@@ -147,20 +144,20 @@ def train_lora(cfg: LoraTrainConfig) -> None:
 		data_collator=data_collator,
 	)
 
-	print("Iniciando treino LoRA...")
+	print("Starting LoRA training...")
 	trainer.train()
 
-	print("Salvando adapter LoRA...")
+	print("Saving LoRA adapter...")
 	trainer.save_model()
 	tokenizer.save_pretrained(str(cfg.output_dir))
 
-	print("Treino concluído. Para usar no dbguide:")
-	print("- Suba esse modelo/adapter em um servidor (ex.: Ollama, vLLM, etc.)")
-	print("- Configure OLLAMA_MODEL_MYSQL/REDSHIFT ou OPENAI_MODEL_* com o nome/ID dele.")
+	print("Training complete. To use it in dbguide:")
+	print("- Deploy this model/adapter to a server (e.g., Ollama, vLLM, etc.)")
+	print("- Configure OLLAMA_MODEL_MYSQL/REDSHIFT or OPENAI_MODEL_* with its name/ID.")
 
 
 def parse_args() -> LoraTrainConfig:
-	parser = argparse.ArgumentParser(description="Treinar LoRA em Mistral 7B para SQL.")
+	parser = argparse.ArgumentParser(description="Train a LoRA adapter on Mistral 7B for SQL.")
 	parser.add_argument("--data-path", type=str, default="data/lora_training/train.jsonl")
 	parser.add_argument("--output-dir", type=str, default="data/lora_training/out_mistral7b_lora")
 	parser.add_argument("--epochs", type=int, default=1)

@@ -10,8 +10,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
-# Garante que o pacote "dbguide" (pasta interna) esteja visivel como pacote
-# top-level, adicionando a raiz do projeto ao sys.path.
+# Ensure the internal "dbguide" package is visible as a top-level package
+# by adding the project root directory to sys.path.
 _THIS_FILE = Path(__file__).resolve()
 _PROJECT_ROOT = _THIS_FILE.parents[2]  # .../dev/dbguide
 if str(_PROJECT_ROOT) not in sys.path:
@@ -28,7 +28,7 @@ from dbguide.app.safety import (
 
 load_dotenv()
 
-# PRECISA vir antes de qualquer outro comando do Streamlit
+# Must be called before any other Streamlit command
 st.set_page_config(page_title="DBGuide", layout="wide")
 
 MODEL_MYSQL_OLLAMA = os.getenv("OLLAMA_MODEL_MYSQL", "mistral:7b-instruct")
@@ -82,14 +82,14 @@ if "last_checks" not in st.session_state:
     st.session_state["last_checks"] = ""
 
 if "provider_state" not in st.session_state:
-    # Guarda historico e ultimo resultado por provedor (Ollama / OpenAI)
+    # Store history and last result for each provider (Ollama / OpenAI)
     st.session_state["provider_state"] = {}
 
 
 def _strip_code_fences(text: str | None) -> str:
-    """Remove TODAS as cercas ```...``` (com ou sem linguagem).
+    """Remove all ```...``` fences (with or without language labels).
 
-    Funciona mesmo quando ha varios blocos de codigo no mesmo texto.
+    Works even when there are multiple code blocks in the same text.
     """
     if not text:
         return ""
@@ -100,7 +100,7 @@ def _strip_code_fences(text: str | None) -> str:
 
 
 def _get_provider_state(provider: str) -> dict:
-    """Retorna (ou inicializa) o estado associado a um provedor de LLM."""
+    """Return (or initialize) the state associated with a given LLM provider."""
     ps = st.session_state.setdefault("provider_state", {})
     if provider not in ps:
         ps[provider] = {
@@ -120,12 +120,12 @@ with st.sidebar:
     provider = st.radio("Provedor de LLM", ["Ollama", "OpenAI"], index=0)
 
     st.markdown("---")
-    st.subheader("Recuperacao (RAG)")
+    st.subheader("Retrieval (RAG)")
     top_k = st.slider("Cards (top_k)", min_value=3, max_value=12, value=6, step=1)
     alpha = st.slider("Peso vetor vs keyword (alpha)", min_value=0.0, max_value=1.0, value=0.55, step=0.05)
 
     if provider == "OpenAI" and not os.getenv("OPENAI_API_KEY"):
-        st.warning("Defina OPENAI_API_KEY no .env para usar OpenAI.")
+        st.warning("Set OPENAI_API_KEY in .env to use OpenAI.")
 
 # Sincroniza o estado global com o estado especifico do provedor selecionado
 _prov_state = _get_provider_state(provider)
@@ -147,10 +147,10 @@ def handle_question(question: str) -> None:
     if not question.strip():
         return
 
-    # Estado especifico do provedor atual
+    # Provider-specific state for the currently selected provider
     prov_state = _get_provider_state(provider)
 
-    # A cada nova pergunta, limpa completamente o historico desse provedor
+    # For each new question, reset the conversation history for this provider
     prov_state["messages"] = []
     prov_state["messages"].append({"role": "user", "content": question})
     st.session_state["messages"] = prov_state["messages"]
@@ -177,7 +177,7 @@ def handle_question(question: str) -> None:
         explicacao_text = sections.get("explicacao", "")
         checks_text = sections.get("checks", "")
 
-        # Garante que SQL e checks nao tragam ```sql ... ``` dentro do bloco.
+        # Ensure SQL and checks do not contain ```sql ... ``` fences inside the block.
         sql_only = _strip_code_fences(sql_only)
         checks_text = _strip_code_fences(checks_text)
 
@@ -195,6 +195,7 @@ def handle_question(question: str) -> None:
     prov_state["last_checks"] = checks_text
 
     # Reflete tambem no estado global (para rendering imediato)
+    # Mirror provider-specific state into the global session state for immediate rendering
     st.session_state["last_cards"] = prov_state["last_cards"]
     st.session_state["last_sql"] = prov_state["last_sql"]
     st.session_state["last_guardrails"] = prov_state["last_guardrails"]

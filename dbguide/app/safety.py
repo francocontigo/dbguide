@@ -9,18 +9,18 @@ DISALLOWED = re.compile(r"\b(drop|delete|truncate|alter|update|insert|create)\b"
 def basic_sql_safety_check(sql: str) -> List[str]:
     issues = []
     if DISALLOWED.search(sql or ""):
-        issues.append("Detectei comando DML/DDL proibido (DROP/DELETE/UPDATE/INSERT/...).")
+        issues.append("Detected forbidden DML/DDL command (DROP/DELETE/UPDATE/INSERT/...).")
 
     if "select" in (sql or "").lower() and "where" not in (sql or "").lower():
-        issues.append("Query sem WHERE (pode varrer tabela inteira).")
+        issues.append("Query without a WHERE clause (may scan the entire table).")
 
     return issues
 
 
 def extract_sql_block(raw: str) -> str:
-    """
-    Extrai conteúdo entre [SQL] e próxima seção.
-    Se não achar, retorna o raw inteiro.
+    """Extract the content between the [SQL] tag and the next section.
+
+    If a [SQL] section is not found, return the full raw text.
     """
     if not raw:
         return ""
@@ -44,10 +44,10 @@ def extract_sql_block(raw: str) -> str:
 
 
 def split_structured_output(raw: str) -> Dict[str, str]:
-    """Divide a saida em secoes [SQL], [EXPLICACAO] e [CHECKS].
+    """Split the model output into [SQL], [EXPLICACAO]/[EXPLICAÇÃO] and [CHECKS] sections.
 
-    Retorna um dicionario com as chaves "sql", "explicacao" e "checks".
-    Se alguma secao nao existir, o valor sera string vazia.
+    Returns a dictionary with keys "sql", "explicacao" and "checks".
+    If a section does not exist, the corresponding value is an empty string.
     """
 
     sections: Dict[str, List[str]] = {"sql": [], "explicacao": [], "checks": []}

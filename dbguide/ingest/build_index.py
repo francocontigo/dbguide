@@ -13,17 +13,17 @@ CORPUS_DIR = BASE_DIR / "corpus"
 
 
 def main() -> None:
-    # Garante que lemos os .md da pasta dbguide/corpus, mesmo quando
-    # o script e executado a partir da raiz do projeto.
+    # Ensure we read .md files from dbguide/corpus even when
+    # the script is executed from the project root.
     docs = read_markdown_docs(str(CORPUS_DIR))
     if not docs:
-        raise SystemExit("Nenhum .md encontrado em ./corpus. Crie alguns cards primeiro.")
+        raise SystemExit("No .md files found in ./corpus. Create some cards first.")
 
     build_vector_index(docs, chroma_dir="data/chroma", collection_name="sql_cards")
     bm25 = build_bm25(docs)
     save_bm25(bm25, docs, path="data/bm25.pkl")
 
-    print(f"OK: indexado {len(docs)} docs.")
+    print(f"OK: indexed {len(docs)} docs.")
 
 
 if __name__ == "__main__":

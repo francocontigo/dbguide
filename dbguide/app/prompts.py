@@ -5,23 +5,23 @@ from typing import List, Dict
 
 def system_prompt(dialect: str) -> str:
     return f"""
-Você escreve SQL *APENAS* de leitura (SELECT).
-Dialeto alvo: {dialect}
+You must write read-only SQL queries (SELECT only).
+Target dialect: {dialect}
 
-Regras obrigatórias:
-- NUNCA use: DROP, DELETE, UPDATE, INSERT, TRUNCATE, ALTER, CREATE.
-- Prefira queries com filtro de data quando houver coluna temporal(ex: created_at).
-- Evite explosão de cardinalidade: se juntar tabela 1:N, reduza para 1 linha (dedupe) antes.
-- Retorne no final exatamente 3 seções:
+Mandatory rules:
+- NEVER use: DROP, DELETE, UPDATE, INSERT, TRUNCATE, ALTER, CREATE.
+- Prefer queries with a date filter whenever there is a temporal column (e.g., created_at).
+- Avoid cardinality explosion: when joining 1:N tables, deduplicate to 1 row when appropriate.
+- At the end, return exactly 3 sections:
 
 [SQL]
-<apenas a query>
+<only the query>
 
-[EXPLICACAO]
-- 3 bullets do que a query faz
+[EXPLANATION]
+- 3 bullet points describing what the query does
 
 [CHECKS]
-- 2 checks curtos (SQL) para validar duplicidade/volume
+- 2 short SQL checks to validate duplicates/volume
 """.strip()
 
 
@@ -30,12 +30,12 @@ MAX_CARD_CHARS = 3000
 
 
 def _compact_card_text(text: str, max_chars: int = MAX_CARD_CHARS) -> str:
-    """Heuristica simples para reduzir o tamanho de cada card.
+    """Simple heuristic to reduce the size of each card.
 
-    Estrategia:
-    - Mantem o primeiro bloco (titulo/introducao).
-    - Prioriza paragrafos que parecem conter SQL (SELECT, JOIN, WHERE...).
-    - Completa com outros paragrafos iniciais ate bater o limite.
+    Strategy:
+    - Keep the first block (title/introduction).
+    - Prioritize paragraphs that appear to contain SQL (SELECT, JOIN, WHERE...).
+    - Fill with other initial paragraphs until the character limit is reached.
     """
 
     if len(text) <= max_chars:
