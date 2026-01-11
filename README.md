@@ -74,23 +74,31 @@ Isso gera:
 - `data/chroma/` (índice vetorial)
 - `data/bm25.pkl` (índice BM25)
 
+
 4. Rodar o chat
 ----------------
 
-Ainda na raiz do projeto:
+Acesse a interface Streamlit:
 
 ```bash
 uv run streamlit run dbguide/app/streamlit_app.py
 ```
 
-Na interface você escolhe:
+Na interface você pode configurar:
 
-- Dialeto (MySQL ou Redshift).
-- Provedor (Ollama ou OpenAI).
-- Faz perguntas em linguagem natural, e o app devolve:
-	- SQL sugerido.
-	- Explicação em bullets.
-	- Checks para validar duplicidade/volume.
+- **Dialeto:** MySQL ou Redshift (define o contexto do SQL gerado).
+- **Provedor de LLM:** Ollama (local) ou OpenAI (nuvem).
+- **Filtro de Metadata:**
+    - *Heurístico*: o sistema tenta filtrar os cards por metadados (ex: domínio, dialeto, tags) usando correspondência de palavras-chave na sua pergunta.
+    - *LLM*: um agente LLM sugere dinamicamente o melhor filtro de metadados com base na sua pergunta e nos metadados disponíveis nos cards.
+- **Cards (top_k):** Quantos cards (máximo) usar como contexto para o modelo.
+- **Peso vetor vs keyword (alpha):** Ajusta o peso entre busca semântica (vetorial) e busca por palavra-chave (BM25) no RAG.
+
+Faça perguntas em linguagem natural e o app retorna:
+
+- SQL sugerido.
+- Explicação em bullets.
+- Checks para validar duplicidade/volume.
 
 5. Como o RAG funciona (resumo)
 --------------------------------
