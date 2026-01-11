@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import logging
 from pathlib import Path
 
 import chromadb
@@ -10,12 +11,21 @@ import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
+
 # Ensure the internal "dbguide" package is visible as a top-level package
 # by adding the project root directory to sys.path.
 _THIS_FILE = Path(__file__).resolve()
 _PROJECT_ROOT = _THIS_FILE.parents[2]  # .../dev/dbguide
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+# Setup logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger("dbguide")
 
 from dbguide.app.llm import ollama_chat, openai_chat
 from dbguide.app.prompts import system_prompt, user_prompt
@@ -114,6 +124,7 @@ def _get_provider_state(provider: str) -> dict:
         }
     return ps[provider]
 
+
 with st.sidebar:
     st.header("Configuracoes")
     dialect = st.selectbox("Dialeto", ["mysql", "redshift"], index=0)
@@ -123,6 +134,15 @@ with st.sidebar:
     st.subheader("Retrieval (RAG)")
     top_k = st.slider("Cards (top_k)", min_value=3, max_value=12, value=6, step=1)
     alpha = st.slider("Peso vetor vs keyword (alpha)", min_value=0.0, max_value=1.0, value=0.55, step=0.05)
+
+    st.markdown("---")
+    st.subheader("Filtro de Metadata")
+    filter_mode = st.radio(
+        "Modo de filtro de metadata:",
+        ["Heurístico", "LLM"],
+        index=0,
+        help="Escolha se o filtro de metadata será heurístico (palavra-chave) ou sugerido por LLM."
+    )
 
     if provider == "OpenAI" and not os.getenv("OPENAI_API_KEY"):
         st.warning("Set OPENAI_API_KEY in .env to use OpenAI.")
@@ -158,9 +178,68 @@ def handle_question(question: str) -> None:
     with st.spinner("☝️🤓 Gerando SQL ..."):
         col, bm25, docs = load_retrieval()
 
+        # Coleta todos os metadados únicos disponíveis
+        from dbguide.app.retrieval import get_all_metadata_keys_and_values
+        all_metadata = get_all_metadata_keys_and_values(docs)
+        print("[agent] Metadatas disponíveis para filtro:", all_metadata)
+
+
+        def suggest_metadata_filter_heuristic(question: str, all_metadata: dict) -> dict | None:
+            """Heurística: filtra se valor de metadata aparece na pergunta."""
+            q = question.lower()
+            filter_dict = {}
+            for k, values in all_metadata.items():
+                for v in values:
+                    if v and isinstance(v, str) and v.lower() in q:
+                        filter_dict[k] = v
+            return filter_dict if filter_dict else None
+
+        def suggest_metadata_filter_llm(question: str, all_metadata: dict) -> dict | None:
+            """
+            Usa LLM para sugerir o melhor filtro de metadata.
+            O prompt apresenta os metadados disponíveis e pede um dicionário JSON de filtro.
+            """
+            from dbguide.app.llm import openai_chat
+            prompt = (
+                "Você é um assistente para busca de cards SQL.\n"
+                "Dada a pergunta do usuário e os metadatas disponíveis, sugira um filtro de metadata (em JSON) para buscar os cards mais relevantes.\n"
+                f"Pergunta: {question}\n"
+                f"Metadatas disponíveis: {all_metadata}\n"
+                "Responda apenas com um dicionário JSON de filtro, ou um dicionário vazio se não houver filtro."
+            )
+            try:
+                response = openai_chat(
+                    model="gpt-3.5-turbo",  # ou outro modelo rápido
+                    system="Você é um agente de filtro de metadata para busca de cards SQL.",
+                    user=prompt,
+                    temperature=0.0,
+                )
+                import json as _json
+                logger.info(f"[LLM Filter Agent] Resposta bruta: {response}")
+                filter_dict = _json.loads(response)
+                return filter_dict if filter_dict else None
+            except Exception as e:
+                logger.warning(f"[LLM Filter Agent] Erro ao sugerir filtro: {e}")
+                return None
+
+        if filter_mode == "LLM":
+            metadata_filter = suggest_metadata_filter_llm(question, all_metadata)
+        else:
+            metadata_filter = suggest_metadata_filter_heuristic(question, all_metadata)
+        logger.info(f"[agent] Filtro sugerido: {metadata_filter}")
+
         retrieval_query = f"{question}\nDIALETO={dialect}"
-        cards = hybrid_search(retrieval_query, col, bm25, docs, top_k=top_k, alpha=alpha)
-        prov_state["last_cards"] = cards
+        cards = hybrid_search(retrieval_query, col, bm25, docs, top_k=top_k, alpha=alpha, metadata_filter=metadata_filter)
+
+        # Limita a 3 arquivos de pattern e 3 de query
+        pattern_cards = [c for c in cards if "/pattern_cards/" in c["id"] or "\\pattern_cards\\" in c["id"]]
+        query_cards = [c for c in cards if "/query_cards/" in c["id"] or "\\query_cards\\" in c["id"]]
+        limited_cards = pattern_cards[:3] + query_cards[:3]
+        # Se não houver 3 de cada, preenche com outros até top_k
+        if len(limited_cards) < top_k:
+            outros = [c for c in cards if c not in limited_cards]
+            limited_cards += outros[: (top_k - len(limited_cards))]
+        prov_state["last_cards"] = limited_cards
 
         sys = system_prompt(dialect)
         usr = user_prompt(question, cards, dialect)

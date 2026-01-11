@@ -1,3 +1,8 @@
+
+"""
+LLM utilities for DBGuide: wrappers for Ollama and OpenAI chat APIs.
+All functions are type-annotated and documented.
+"""
 from __future__ import annotations
 
 import os
@@ -6,10 +11,8 @@ from typing import Optional
 import requests
 from openai import OpenAI
 
-
-DEFAULT_OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_OPENAI_TIMEOUT_S = int(os.getenv("OPENAI_TIMEOUT_S", "100"))
-
+DEFAULT_OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
+DEFAULT_OPENAI_TIMEOUT_S: int = int(os.getenv("OPENAI_TIMEOUT_S", "100"))
 
 def ollama_chat(
     model: str,
@@ -19,8 +22,19 @@ def ollama_chat(
     temperature: float = 0.2,
     timout_s: int = 100,
 ) -> str:
-    """Get a single response from a model running via Ollama."""
+    """
+    Get a single response from a model running via Ollama.
 
+    Args:
+        model: Model name (e.g. "mistral:7b-instruct").
+        system: System prompt.
+        user: User prompt.
+        ollama_url: Ollama server URL.
+        temperature: Sampling temperature.
+        timout_s: Timeout in seconds.
+    Returns:
+        Response string from the model.
+    """
     payload = {
         "model": model,
         "stream": False,
@@ -36,7 +50,6 @@ def ollama_chat(
     # {"message": {"role":"assistant","content":"..."}}
     return data.get("message", {}).get("content", "")
 
-
 def openai_chat(
     model: str,
     system: str,
@@ -44,8 +57,18 @@ def openai_chat(
     temperature: float = 0.2,
     timeout_s: Optional[int] = None,
 ) -> str:
-    """Get a single response from a model hosted on OpenAI."""
+    """
+    Get a single response from a model hosted on OpenAI.
 
+    Args:
+        model: Model name (e.g. "gpt-4o-mini").
+        system: System prompt.
+        user: User prompt.
+        temperature: Sampling temperature.
+        timeout_s: Timeout in seconds (optional).
+    Returns:
+        Response string from the model.
+    """
     client = OpenAI()
     effective_timeout = timeout_s or DEFAULT_OPENAI_TIMEOUT_S
 
