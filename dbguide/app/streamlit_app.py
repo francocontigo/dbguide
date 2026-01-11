@@ -128,21 +128,18 @@ def _get_provider_state(provider: str) -> dict:
 with st.sidebar:
     st.header("Configuracoes")
     dialect = st.selectbox("Dialeto", ["mysql", "redshift"], index=0)
-    provider = st.radio("Provedor de LLM", ["Ollama", "OpenAI"], index=0)
+    provider = st.selectbox("Provedor de LLM", ["Ollama", "OpenAI"], index=0)
+    filter_mode = st.selectbox(
+        "Filtro de Metadata:",
+        ["Heurístico", "LLM"],
+        index=0,
+        help="Escolha se o filtro de metadata será heurístico (palavra-chave) ou sugerido por LLM."
+    )
 
     st.markdown("---")
     st.subheader("Retrieval (RAG)")
     top_k = st.slider("Cards (top_k)", min_value=3, max_value=12, value=6, step=1)
     alpha = st.slider("Peso vetor vs keyword (alpha)", min_value=0.0, max_value=1.0, value=0.55, step=0.05)
-
-    st.markdown("---")
-    st.subheader("Filtro de Metadata")
-    filter_mode = st.radio(
-        "Modo de filtro de metadata:",
-        ["Heurístico", "LLM"],
-        index=0,
-        help="Escolha se o filtro de metadata será heurístico (palavra-chave) ou sugerido por LLM."
-    )
 
     if provider == "OpenAI" and not os.getenv("OPENAI_API_KEY"):
         st.warning("Set OPENAI_API_KEY in .env to use OpenAI.")
