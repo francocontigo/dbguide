@@ -1,7 +1,35 @@
-DBGuide
-=======
+
+# DBGuide
 
 Gerador de SQL seguro usando RAG (recuperação de conhecimento em Markdown) e modelos de linguagem (Ollama ou OpenAI).
+
+## Sobre o projeto
+
+O DBGuide segue boas práticas de Python:
+- **Tipagem estática** em todas as funções e dataclasses.
+- **Docstrings** e comentários explicativos em todos os módulos.
+- Estrutura modular: fácil de estender e manter.
+
+### Principais módulos
+- `dbguide/app/retrieval.py`: leitura, indexação e busca híbrida nos cards.
+- `dbguide/app/llm.py`: wrappers para modelos Ollama e OpenAI.
+- `dbguide/app/prompts.py`: geração de prompts e compactação de cards.
+- `dbguide/app/safety.py`: checagem de segurança e parsing de respostas.
+- `dbguide/ingest/build_index.py`: script para indexar os cards.
+
+### Exemplo de uso programático
+```python
+from dbguide.app.retrieval import read_markdown_docs, build_vector_index, build_bm25, hybrid_search
+docs = read_markdown_docs("dbguide/corpus")
+col = build_vector_index(docs)
+bm25 = build_bm25(docs)
+results = hybrid_search("minha pergunta", col, bm25, docs)
+```
+
+### Contribuição
+- Siga o padrão de tipagem e docstrings.
+- Comente trechos complexos.
+- Sugestões e PRs são bem-vindos!
 
 1. Instalação
 --------------
