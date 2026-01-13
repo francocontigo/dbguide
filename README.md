@@ -210,15 +210,6 @@ response = claude.chat(
     user="How to optimize MySQL queries?"
 )
 ```
-### Contributing
-
-- Follow SOLID principles
-- Use type annotations and docstrings
-- Write tests for new features
-- Update documentation
-- Pull requests are welcome!
-
----
 
 ## 1. Installation
 
@@ -323,7 +314,7 @@ The project includes a professional LoRA training script with:
 - ✅ Error handling and progress tracking
 
 **Requirements:**
-- GPU with 16GB+ VRAM (24GB recommended)
+- GPU with 16GB+ VRAM (8GB+ recommended)
 - Training dataset in JSONL format
 
 **Dataset Format:**
@@ -509,40 +500,6 @@ assert len(results) > 0
 assert results[0].score > 0
 print(f"✅ Found {len(results)} results")
 ```
-
----
-
-## Contributing
-
-Contributions are welcome! To contribute:
-
-1. **Fork the repository**
-2. **Create a feature branch:** `git checkout -b feature/amazing-feature`
-3. **Follow SOLID principles** when adding new features
-4. **Use type annotations** and docstrings for all functions/classes
-5. **Write tests** for new functionality
-6. **Commit your changes:** `git commit -m 'Add amazing feature'`
-7. **Push to the branch:** `git push origin feature/amazing-feature`
-8. **Open a Pull Request**
-
-### Code Style
-
-- Use type hints for all function parameters and return values
-- Write comprehensive docstrings (Google style)
-- Follow PEP 8 conventions
-- Keep functions focused (Single Responsibility Principle)
-- Use dependency injection instead of hardcoded dependencies
-
-### Architecture Guidelines
-
-When extending the system:
-
-1. **Add new interfaces in `domain/interfaces.py`** if you need a new abstraction
-2. **Implement services in `services/`** following the interface
-3. **Use factory functions** to create instances with proper dependencies
-4. **Maintain backward compatibility** when possible
-5. **Update tests** and documentation
-
 ---
 
 ## License
