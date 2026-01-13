@@ -76,7 +76,7 @@ validator = BasicSQLValidator()
 parser = SQLOutputParser()
 
 # 3. User question
-question = "Show me all users who registered in the last 30 days"
+question = "Mostre todos os pedidos com entregas concluídas nos últimos 30 dias"
 
 # 4. Retrieve relevant cards
 cards = retrieval.search(
@@ -159,10 +159,10 @@ retrieval = HybridRetrievalService(collection, bm25_index, documents)
 
 # Search with metadata filter
 results = retrieval.search(
-    query="How to join tables in MySQL?",
+    query="Como unir tabelas de pedidos e entregas?",
     top_k=5,
     alpha=0.55,  # 55% vector, 45% keyword
-    metadata_filter={"dialect": "mysql", "domain": "ecommerce"}
+    metadata_filter={"dialect": "redshift", "domain": "vendas"}
 )
 
 for result in results:
@@ -212,7 +212,7 @@ response = claude.chat(
 ```
 ### Contributing
 
-- Follow SOLID principles (see [REFACTORING.md](REFACTORING.md))
+- Follow SOLID principles
 - Use type annotations and docstrings
 - Write tests for new features
 - Update documentation
@@ -283,11 +283,6 @@ This generates:
 uv run python run_app.py
 ```
 
-```bash
-uv run python run_app.py
-```
-
-Or directly:
 The interface allows you to configure:
 
 - **Dialect:** MySQL or Redshift (defines SQL generation context)
@@ -335,11 +330,11 @@ The project includes a professional LoRA training script with:
 
 Create a file `data/lora_training/train.jsonl` with examples:
 ```jsonl
-{"instruction": "Show all users from last month", "response": "SELECT * FROM users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH);"}
-{"instruction": "Count orders by customer", "response": "SELECT customer_id, COUNT(*) FROM orders GROUP BY customer_id;"}
+{"instruction": "Mostre todos os pedidos do último mês", "response": "SELECT * FROM pedidos WHERE data_pedido >= DATE_SUB(NOW(), INTERVAL 1 MONTH);"}
+{"instruction": "Conte entregas por status", "response": "SELECT status_entrega, COUNT(*) FROM entregas GROUP BY status_entrega;"}
 ```
 
-A sample dataset with 25 examples is included in [data/lora_training/train.jsonl](data/lora_training/train.jsonl).
+A sample dataset is included in [data/lora_training/train_example.jsonl](data/lora_training/train_example.jsonl).
 
 **Training:**
 
