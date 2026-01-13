@@ -1,9 +1,20 @@
+"""
+Prompt utilities for DBGuide.
+
+DEPRECATED: This module is kept for backward compatibility.
+Please use dbguide.services.prompt_builder for new code.
+"""
 from __future__ import annotations
 
 from typing import List, Dict
 
+# Import from compatibility layer
+from dbguide.app.prompts_compat import system_prompt, user_prompt
 
-def system_prompt(dialect: str) -> str:
+__all__ = ['system_prompt', 'user_prompt']
+
+
+def _system_prompt_deprecated(dialect: str) -> str:
     return f"""
 You must write read-only SQL queries (SELECT only).
 Target dialect: {dialect}
