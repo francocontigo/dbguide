@@ -15,7 +15,7 @@ def main():
     sys.path.insert(0, str(project_root))
 
     # Import and run the build script
-    from dbguide.ingest.build_index_refactored import main as build_main
+    from dbguide.ingest.build_index import main as build_main
 
     build_main()
 

@@ -13,6 +13,36 @@ from dbguide.models.document import Document
 from dbguide.services.indexing import BM25IndexBuilder
 
 
+def normalize_filter(metadata_filter: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Normalize metadata filter to ensure ChromaDB compatibility.
+    Converts list values to proper operator expressions.
+
+    Args:
+        metadata_filter: Raw metadata filter dictionary.
+
+    Returns:
+        Normalized filter dictionary compatible with ChromaDB.
+    """
+    if not metadata_filter:
+        return metadata_filter
+
+    normalized = {}
+    for key, value in metadata_filter.items():
+        if isinstance(value, list):
+            # Convert list to $in operator for ChromaDB
+            if len(value) == 1:
+                # Single value: use direct comparison
+                normalized[key] = value[0]
+            else:
+                # Multiple values: use $in operator
+                normalized[key] = {"$in": value}
+        else:
+            normalized[key] = value
+
+    return normalized
+
+
 class HybridRetrievalService(RetrievalService):
     """
     Implements hybrid search combining vector similarity and BM25 keyword matching.
@@ -57,11 +87,14 @@ class HybridRetrievalService(RetrievalService):
         Returns:
             List of search results ordered by relevance score.
         """
+        # Normalize filter to ensure ChromaDB compatibility
+        normalized_filter = normalize_filter(metadata_filter)
+
         # 1) Vector-based search with optional metadata filter
-        vector_scores = self._vector_search(query, top_k, metadata_filter)
+        vector_scores = self._vector_search(query, top_k, normalized_filter)
 
         # 2) BM25 keyword-based search
-        bm25_scores = self._bm25_search(query, metadata_filter)
+        bm25_scores = self._bm25_search(query, normalized_filter)
 
         # 3) Combine scores using alpha weighting
         combined_results = self._combine_scores(

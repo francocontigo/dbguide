@@ -9,7 +9,6 @@ DBGuide follows Python best practices with a clean, modular architecture:
 - ✅ **Dependency injection** for flexibility and testability
 - ✅ **Type annotations** on all functions and classes
 - ✅ **Clean architecture** with 4 layers (Domain, Models, Services, Application)
-- ✅ **Backward compatible** - old code still works!
 
 ### Architecture Overview
 
@@ -24,6 +23,14 @@ DBGuide follows Python best practices with a clean, modular architecture:
 │     Models Layer                    │  Data Models
 └─────────────────────────────────────┘
 ```
+
+### Key Features
+
+- ✅ **Hybrid Search**: Combines vector similarity (ChromaDB) with keyword search (BM25)
+- ✅ **Intelligent Filtering**: LLM-powered metadata filtering for query routing
+- ✅ **Multi-LLM Support**: Works with Ollama (local) or OpenAI (cloud)
+- ✅ **SQL Validation**: Built-in SQL parsing and safety checks
+- ✅ **Clean Architecture**: SOLID principles with dependency injection
 
 ### Main Modules
 
@@ -260,14 +267,8 @@ The cards are `.md` files in `dbguide/corpus/` (e.g., `pattern_cards/` and `quer
 
 To index the cards in ChromaDB + BM25:
 
-**Option 1: Using convenience script (recommended)**
 ```bash
 uv run python build_indexes.py
-```
-
-**Option 2: Direct invocation**
-```bash
-uv run python -m dbguide.ingest.build_index_refactored
 ```
 
 This generates:
@@ -282,19 +283,11 @@ This generates:
 uv run python run_app.py
 ```
 
-Or:
 ```bash
-uv run streamlit run dbguide/app/streamlit_app_refactored.py
+uv run python run_app.py
 ```
 
-### Option 2: Original App (Still works!)
-
-```bash
-uv run streamlit run dbguide/app/streamlit_app.py
-```
-
-### Features
-
+Or directly:
 The interface allows you to configure:
 
 - **Dialect:** MySQL or Redshift (defines SQL generation context)

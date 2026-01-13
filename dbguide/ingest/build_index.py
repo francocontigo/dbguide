@@ -1,45 +1,71 @@
-
 """
-Script to build the vector and BM25 indexes for DBGuide from markdown corpus.
-Ensures all metadata is properly formatted for ChromaDB.
+Script to build vector and BM25 indexes for DBGuide from markdown corpus.
+Refactored with dependency injection and service-oriented architecture.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List
 
-from dbguide.app.retrieval import (
-    read_markdown_docs,
-    build_vector_index,
-    build_bm25,
-    save_bm25,
-)
+from dbguide.models.document import Document
+from dbguide.services.document_loader import DocumentLoader
+from dbguide.services.indexing import VectorIndexBuilder, BM25IndexBuilder
+
 
 BASE_DIR: Path = Path(__file__).resolve().parent.parent
 CORPUS_DIR: Path = BASE_DIR / "corpus"
 
+
+def normalize_metadata(documents: list[Document]) -> None:
+    """
+    Normalize metadata to ensure ChromaDB compatibility.
+
+    Args:
+        documents: List of documents to normalize.
+    """
+    for doc in documents:
+        # Convert list values to comma-separated strings
+        for key, value in list(doc.metadata.items()):
+            if isinstance(value, list):
+                doc.metadata[key] = ','.join(map(str, value))
+
+        # Ensure dialect field exists
+        if 'dialect' not in doc.metadata:
+            doc.metadata['dialect'] = None
+
+
 def main() -> None:
     """
-    Reads all markdown files, normalizes metadata, builds vector and BM25 indexes, and saves them.
+    Main function to build indexes.
+    Loads documents, normalizes metadata, and builds both vector and BM25 indexes.
     """
-    docs: List[Any] = read_markdown_docs(str(CORPUS_DIR))
-    if not docs:
+    # Load documents
+    loader = DocumentLoader(str(CORPUS_DIR))
+    documents = loader.load_documents()
+
+    if not documents:
         raise SystemExit("No .md files found in ./corpus. Create some cards first.")
 
-    # Ensure all metadata values are primitives (str, int, float, bool, None)
-    for d in docs:
-        for k, v in list(d.metadata.items()):
-            if isinstance(v, list):
-                # Convert lists to comma-separated string
-                d.metadata[k] = ','.join(map(str, v))
-        if 'dialect' not in d.metadata:
-            d.metadata['dialect'] = None
+    print(f"Loaded {len(documents)} documents from corpus.")
 
-    build_vector_index(docs, chroma_dir="data/chroma", collection_name="sql_cards")
-    bm25 = build_bm25(docs)
-    save_bm25(bm25, docs, path="data/bm25.pkl")
+    # Normalize metadata for ChromaDB compatibility
+    normalize_metadata(documents)
 
-    print(f"OK: indexed {len(docs)} docs.")
+    # Build vector index
+    print("Building vector index...")
+    vector_builder = VectorIndexBuilder(
+        chroma_dir="data/chroma"
+    )
+    vector_builder.build_index(documents, collection_name="sql_cards")
+    print("Vector index built successfully.")
+
+    # Build BM25 index
+    print("Building BM25 index...")
+    bm25_builder = BM25IndexBuilder()
+    bm25_index = bm25_builder.build_index(documents)
+    bm25_builder.save_index(bm25_index, documents, path="data/bm25.pkl")
+    print("BM25 index built successfully.")
+
+    print(f"✓ Indexed {len(documents)} documents successfully.")
 
 
 if __name__ == "__main__":

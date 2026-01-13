@@ -1,25 +1,29 @@
+"""
+DBGuide Streamlit Application.
+Refactored with dependency injection and SOLID principles.
+"""
 from __future__ import annotations
 
 import json
-import os
-import sys
 import logging
+import os
 from pathlib import Path
+from typing import Dict, List, Optional
 
 import chromadb
 import streamlit as st
-import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
+from dbguide.models.document import Document
+from dbguide.services.document_loader import get_all_metadata_keys_and_values
+from dbguide.services.indexing import BM25IndexBuilder
+from dbguide.services.llm_providers import OllamaProvider, OpenAIProvider
+from dbguide.services.metadata_filter import create_metadata_filter
+from dbguide.services.prompt_builder import SQLPromptBuilder
+from dbguide.services.retrieval_service import HybridRetrievalService
+from dbguide.services.sql_validator import BasicSQLValidator, SQLOutputParser
 
-# Ensure the internal "dbguide" package is visible as a top-level package
-# by adding the project root directory to sys.path.
-_THIS_FILE = Path(__file__).resolve()
-_PROJECT_ROOT = _THIS_FILE.parents[2]  # .../dev/dbguide
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-# Setup logger
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] %(levelname)s %(message)s",
@@ -27,20 +31,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("dbguide")
 
-from dbguide.app.llm import ollama_chat, openai_chat
-from dbguide.app.prompts import system_prompt, user_prompt
-from dbguide.app.retrieval import load_bm25, hybrid_search
-from dbguide.app.safety import (
-    basic_sql_safety_check,
-    extract_sql_block,
-    split_structured_output,
-)
-
 load_dotenv()
 
-# Must be called before any other Streamlit command
+# Page configuration
 st.set_page_config(page_title="DBGuide", layout="wide")
 
+# Environment variables
 MODEL_MYSQL_OLLAMA = os.getenv("OLLAMA_MODEL_MYSQL", "mistral:7b-instruct")
 MODEL_REDSHIFT_OLLAMA = os.getenv("OLLAMA_MODEL_REDSHIFT", "mistral:7b-instruct")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -49,270 +45,368 @@ MODEL_MYSQL_OPENAI = os.getenv("OPENAI_MODEL_MYSQL", "gpt-4o-mini")
 MODEL_REDSHIFT_OPENAI = os.getenv("OPENAI_MODEL_REDSHIFT", "gpt-4o-mini")
 
 
+class AppState:
+    """Manages application state following the Single Responsibility Principle."""
+
+    def __init__(self):
+        """Initialize session state keys if they don't exist."""
+        if "messages" not in st.session_state:
+            st.session_state["messages"] = []
+
+        if "last_cards" not in st.session_state:
+            st.session_state["last_cards"] = []
+
+        if "last_sql" not in st.session_state:
+            st.session_state["last_sql"] = ""
+
+        if "last_guardrails" not in st.session_state:
+            st.session_state["last_guardrails"] = ""
+
+        if "last_explanation" not in st.session_state:
+            st.session_state["last_explanation"] = ""
+
+        if "last_checks" not in st.session_state:
+            st.session_state["last_checks"] = ""
+
+        if "provider_state" not in st.session_state:
+            st.session_state["provider_state"] = {}
+
+    def get_provider_state(self, provider: str) -> Dict:
+        """
+        Get or create state for a specific provider.
+
+        Args:
+            provider: Provider name ('Ollama' or 'OpenAI').
+
+        Returns:
+            Provider-specific state dictionary.
+        """
+        ps = st.session_state["provider_state"]
+        if provider not in ps:
+            ps[provider] = {
+                "messages": [],
+                "last_cards": [],
+                "last_sql": "",
+                "last_guardrails": "",
+                "last_explanation": "",
+                "last_checks": "",
+            }
+        return ps[provider]
+
+    def sync_provider_state(self, provider: str) -> None:
+        """
+        Sync global state with provider-specific state.
+
+        Args:
+            provider: Provider name to sync.
+        """
+        prov_state = self.get_provider_state(provider)
+        st.session_state["messages"] = prov_state["messages"]
+        st.session_state["last_cards"] = prov_state["last_cards"]
+        st.session_state["last_sql"] = prov_state["last_sql"]
+        st.session_state["last_guardrails"] = prov_state["last_guardrails"]
+        st.session_state["last_explanation"] = prov_state["last_explanation"]
+        st.session_state["last_checks"] = prov_state["last_checks"]
+
+
 @st.cache_resource
-def load_retrieval():
+def load_retrieval_resources():
+    """
+    Load retrieval resources (ChromaDB, BM25, documents).
+    Cached to avoid reloading on every interaction.
+
+    Returns:
+        Tuple of (ChromaDB collection, BM25 index, documents list).
+    """
     client = chromadb.PersistentClient(path="data/chroma")
-    col = client.get_or_create_collection(name="sql_cards")
-    bm25, docs = load_bm25("data/bm25.pkl")
-    return col, bm25, docs
+    collection = client.get_or_create_collection(name="sql_cards")
+
+    bm25_index, documents = BM25IndexBuilder.load_index("data/bm25.pkl")
+
+    return collection, bm25_index, documents
 
 
 def pick_model(dialect: str, provider: str) -> str:
+    """
+    Pick the appropriate model based on dialect and provider.
+
+    Args:
+        dialect: SQL dialect ('mysql' or 'redshift').
+        provider: LLM provider ('Ollama' or 'OpenAI').
+
+    Returns:
+        Model name string.
+    """
     if provider == "OpenAI":
         return MODEL_MYSQL_OPENAI if dialect == "mysql" else MODEL_REDSHIFT_OPENAI
     return MODEL_MYSQL_OLLAMA if dialect == "mysql" else MODEL_REDSHIFT_OLLAMA
 
 
-# --- HIDE STREAMLIT UI ---
-hide_st_style = """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    </style>
+def render_sidebar() -> tuple[str, str, str, int, float]:
     """
-st.markdown(hide_st_style, unsafe_allow_html=True)
+    Render sidebar with configuration options.
 
-st.title("🧠 DBGuide")
-st.caption("Chat para gerar SQL seguro usando RAG.")
-
-if "messages" not in st.session_state:
-    st.session_state["messages"] = []
-if "last_cards" not in st.session_state:
-    st.session_state["last_cards"] = []
-if "last_sql" not in st.session_state:
-    st.session_state["last_sql"] = ""
-if "last_guardrails" not in st.session_state:
-    st.session_state["last_guardrails"] = ""
-if "last_raw" not in st.session_state:
-    st.session_state["last_raw"] = ""
-if "last_explicacao" not in st.session_state:
-    st.session_state["last_explicacao"] = ""
-if "last_checks" not in st.session_state:
-    st.session_state["last_checks"] = ""
-
-if "provider_state" not in st.session_state:
-    # Store history and last result for each provider (Ollama / OpenAI)
-    st.session_state["provider_state"] = {}
-
-
-def _strip_code_fences(text: str | None) -> str:
-    """Remove all ```...``` fences (with or without language labels).
-
-    Works even when there are multiple code blocks in the same text.
+    Returns:
+        Tuple of (dialect, provider, filter_mode, top_k, alpha).
     """
-    if not text:
-        return ""
+    with st.sidebar:
+        st.header("Settings")
 
-    lines = text.strip().splitlines()
-    clean_lines = [ln for ln in lines if not ln.strip().startswith("```")]
-    return "\n".join(clean_lines).strip()
+        dialect = st.selectbox("Dialect", ["mysql", "redshift"], index=0)
+        provider = st.selectbox("LLM Provider", ["Ollama", "OpenAI"], index=0)
+        filter_mode = st.selectbox(
+            "Metadata Filter:",
+            ["Heuristic", "LLM"],
+            index=0,
+            help="Choose if metadata filter will be heuristic (keyword) or suggested by LLM."
+        )
 
+        st.markdown("---")
+        st.subheader("Retrieval (RAG)")
+        top_k = st.slider("Cards (top_k)", min_value=3, max_value=12, value=6, step=1)
+        alpha = st.slider(
+            "Vector vs keyword weight (alpha)",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.55,
+            step=0.05
+        )
 
-def _get_provider_state(provider: str) -> dict:
-    """Return (or initialize) the state associated with a given LLM provider."""
-    ps = st.session_state.setdefault("provider_state", {})
-    if provider not in ps:
-        ps[provider] = {
-            "messages": [],
-            "last_cards": [],
-            "last_sql": "",
-            "last_guardrails": "",
-            "last_raw": "",
-            "last_explicacao": "",
-            "last_checks": "",
-        }
-    return ps[provider]
+        if provider == "OpenAI" and not os.getenv("OPENAI_API_KEY"):
+            st.warning("Set OPENAI_API_KEY in .env to use OpenAI.")
 
-
-with st.sidebar:
-    st.header("Configuracoes")
-    dialect = st.selectbox("Dialeto", ["mysql", "redshift"], index=0)
-    provider = st.selectbox("Provedor de LLM", ["Ollama", "OpenAI"], index=0)
-    filter_mode = st.selectbox(
-        "Filtro de Metadata:",
-        ["Heurístico", "LLM"],
-        index=0,
-        help="Escolha se o filtro de metadata será heurístico (palavra-chave) ou sugerido por LLM."
-    )
-
-    st.markdown("---")
-    st.subheader("Retrieval (RAG)")
-    top_k = st.slider("Cards (top_k)", min_value=3, max_value=12, value=6, step=1)
-    alpha = st.slider("Peso vetor vs keyword (alpha)", min_value=0.0, max_value=1.0, value=0.55, step=0.05)
-
-    if provider == "OpenAI" and not os.getenv("OPENAI_API_KEY"):
-        st.warning("Set OPENAI_API_KEY in .env to use OpenAI.")
-
-# Sincroniza o estado global com o estado especifico do provedor selecionado
-_prov_state = _get_provider_state(provider)
-st.session_state["messages"] = _prov_state["messages"]
-st.session_state["last_cards"] = _prov_state["last_cards"]
-st.session_state["last_sql"] = _prov_state["last_sql"]
-st.session_state["last_guardrails"] = _prov_state["last_guardrails"]
-st.session_state["last_raw"] = _prov_state["last_raw"]
-st.session_state["last_explicacao"] = _prov_state["last_explicacao"]
-st.session_state["last_checks"] = _prov_state["last_checks"]
+    return dialect, provider, filter_mode, top_k, alpha
 
 
-for msg in st.session_state["messages"]:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+def handle_question(
+    question: str,
+    dialect: str,
+    provider: str,
+    filter_mode: str,
+    top_k: int,
+    alpha: float,
+    app_state: AppState,
+) -> None:
+    """
+    Handle user question and generate SQL response.
 
-
-def handle_question(question: str) -> None:
+    Args:
+        question: User's question.
+        dialect: SQL dialect.
+        provider: LLM provider name.
+        filter_mode: Metadata filter mode.
+        top_k: Number of cards to retrieve.
+        alpha: Weight for vector vs keyword search.
+        app_state: Application state manager.
+    """
     if not question.strip():
         return
 
-    # Provider-specific state for the currently selected provider
-    prov_state = _get_provider_state(provider)
+    # Get provider-specific state
+    prov_state = app_state.get_provider_state(provider)
 
-    # For each new question, reset the conversation history for this provider
+    # Reset conversation history for new question
     prov_state["messages"] = []
     prov_state["messages"].append({"role": "user", "content": question})
     st.session_state["messages"] = prov_state["messages"]
 
-    with st.spinner("☝️🤓 Gerando SQL ..."):
-        col, bm25, docs = load_retrieval()
+    with st.spinner("☝️🤓 Generating SQL ..."):
+        # Load retrieval resources
+        collection, bm25_index, documents = load_retrieval_resources()
 
-        # Coleta todos os metadados únicos disponíveis
-        from dbguide.app.retrieval import get_all_metadata_keys_and_values
-        all_metadata = get_all_metadata_keys_and_values(docs)
-        print("[agent] Metadatas disponíveis para filtro:", all_metadata)
+        # Create services with dependency injection
+        retrieval_service = HybridRetrievalService(collection, bm25_index, documents)
 
+        # Get available metadata
+        all_metadata = get_all_metadata_keys_and_values(documents)
+        logger.info(f"[Agent] Available metadata for filter: {all_metadata}")
 
-        def suggest_metadata_filter_heuristic(question: str, all_metadata: dict) -> dict | None:
-            """Heurística: filtra se valor de metadata aparece na pergunta."""
-            q = question.lower()
-            filter_dict = {}
-            for k, values in all_metadata.items():
-                for v in values:
-                    if v and isinstance(v, str) and v.lower() in q:
-                        filter_dict[k] = v
-            return filter_dict if filter_dict else None
-
-        def suggest_metadata_filter_llm(question: str, all_metadata: dict) -> dict | None:
-            """
-            Usa LLM para sugerir o melhor filtro de metadata.
-            O prompt apresenta os metadados disponíveis e pede um dicionário JSON de filtro.
-            """
-            from dbguide.app.llm import openai_chat
-            prompt = (
-                "Você é um assistente para busca de cards SQL.\n"
-                "Dada a pergunta do usuário e os metadatas disponíveis, sugira um filtro de metadata (em JSON) para buscar os cards mais relevantes.\n"
-                f"Pergunta: {question}\n"
-                f"Metadatas disponíveis: {all_metadata}\n"
-                "Responda apenas com um dicionário JSON de filtro, ou um dicionário vazio se não houver filtro."
-            )
-            try:
-                response = openai_chat(
-                    model="gpt-3.5-turbo",  # ou outro modelo rápido
-                    system="Você é um agente de filtro de metadata para busca de cards SQL.",
-                    user=prompt,
-                    temperature=0.0,
-                )
-                import json as _json
-                logger.info(f"[LLM Filter Agent] Resposta bruta: {response}")
-                filter_dict = _json.loads(response)
-                return filter_dict if filter_dict else None
-            except Exception as e:
-                logger.warning(f"[LLM Filter Agent] Erro ao sugerir filtro: {e}")
-                return None
-
+        # Create LLM provider for metadata filtering if needed
         if filter_mode == "LLM":
-            metadata_filter = suggest_metadata_filter_llm(question, all_metadata)
+            filter_llm = OpenAIProvider()
+            metadata_filter_service = create_metadata_filter(
+                "llm",
+                llm_provider=filter_llm,
+                model="gpt-3.5-turbo"
+            )
         else:
-            metadata_filter = suggest_metadata_filter_heuristic(question, all_metadata)
-        logger.info(f"[agent] Filtro sugerido: {metadata_filter}")
+            metadata_filter_service = create_metadata_filter("heuristic")
 
-        retrieval_query = f"{question}\nDIALETO={dialect}"
-        cards = hybrid_search(retrieval_query, col, bm25, docs, top_k=top_k, alpha=alpha, metadata_filter=metadata_filter)
+        # Suggest metadata filter
+        metadata_filter = metadata_filter_service.suggest_filter(
+            question,
+            all_metadata
+        )
+        logger.info(f"[Agent] Suggested filter: {metadata_filter}")
 
-        # Limita a 3 arquivos de pattern e 3 de query
-        pattern_cards = [c for c in cards if "/pattern_cards/" in c["id"] or "\\pattern_cards\\" in c["id"]]
-        query_cards = [c for c in cards if "/query_cards/" in c["id"] or "\\query_cards\\" in c["id"]]
+        # Perform retrieval
+        retrieval_query = f"{question}\nDIALECT={dialect}"
+        cards = retrieval_service.search(
+            retrieval_query,
+            top_k=top_k,
+            alpha=alpha,
+            metadata_filter=metadata_filter
+        )
+
+        # Limit to 3 pattern cards and 3 query cards
+        pattern_cards = [
+            c for c in cards
+            if "/pattern_cards/" in c.id or "\\pattern_cards\\" in c.id
+        ]
+        query_cards = [
+            c for c in cards
+            if "/query_cards/" in c.id or "\\query_cards\\" in c.id
+        ]
+
         limited_cards = pattern_cards[:3] + query_cards[:3]
-        # Se não houver 3 de cada, preenche com outros até top_k
+
+        # Fill remaining slots if needed
         if len(limited_cards) < top_k:
-            outros = [c for c in cards if c not in limited_cards]
-            limited_cards += outros[: (top_k - len(limited_cards))]
+            others = [c for c in cards if c not in limited_cards]
+            limited_cards += others[:(top_k - len(limited_cards))]
+
         prov_state["last_cards"] = limited_cards
 
-        sys = system_prompt(dialect)
-        usr = user_prompt(question, cards, dialect)
+        # Build prompts
+        prompt_builder = SQLPromptBuilder()
+        system_prompt = prompt_builder.build_system_prompt(dialect)
+        user_prompt = prompt_builder.build_user_prompt(question, limited_cards, dialect)
 
+        # Create LLM provider for SQL generation
         model = pick_model(dialect, provider)
 
         if provider == "OpenAI":
-            raw = openai_chat(model=model, system=sys, user=usr)
+            llm_provider = OpenAIProvider()
         else:
-            raw = ollama_chat(model=model, system=sys, user=usr, ollama_url=OLLAMA_URL)
+            llm_provider = OllamaProvider(base_url=OLLAMA_URL)
 
-        sections = split_structured_output(raw)
-        sql_only = sections.get("sql") or extract_sql_block(raw)
-        explicacao_text = sections.get("explicacao", "")
+        # Generate SQL
+        raw_response = llm_provider.chat(
+            model=model,
+            system=system_prompt,
+            user=user_prompt
+        )
+
+        # Parse response
+        parser = SQLOutputParser()
+        sections = parser.split_structured_output(raw_response)
+
+        sql_only = sections.get("sql") or parser.extract_sql_block(raw_response)
+        explanation_text = sections.get("explanation", "")
         checks_text = sections.get("checks", "")
 
-        # Ensure SQL and checks do not contain ```sql ... ``` fences inside the block.
-        sql_only = _strip_code_fences(sql_only)
-        checks_text = _strip_code_fences(checks_text)
+        # Strip code fences
+        sql_only = parser.strip_code_fences(sql_only)
+        checks_text = parser.strip_code_fences(checks_text)
 
-        issues = basic_sql_safety_check(sql_only)
+        # Validate SQL
+        validator = BasicSQLValidator()
+        issues = validator.validate(sql_only)
 
-    if issues:
-        guardrails_text = "\n".join(f"- {i}" for i in issues)
-    else:
-        guardrails_text = "- Sem violacoes obvias (MVP)."
+        if issues:
+            guardrails_text = "\n".join(f"- {issue}" for issue in issues)
+        else:
+            guardrails_text = "- No obvious violations (MVP)."
 
-    prov_state["last_sql"] = sql_only
-    prov_state["last_guardrails"] = guardrails_text
-    prov_state["last_raw"] = raw
-    prov_state["last_explicacao"] = explicacao_text
-    prov_state["last_checks"] = checks_text
+        # Update provider state
+        prov_state["last_sql"] = sql_only
+        prov_state["last_guardrails"] = guardrails_text
+        prov_state["last_explanation"] = explanation_text
+        prov_state["last_checks"] = checks_text
 
-    # Reflete tambem no estado global (para rendering imediato)
-    # Mirror provider-specific state into the global session state for immediate rendering
-    st.session_state["last_cards"] = prov_state["last_cards"]
-    st.session_state["last_sql"] = prov_state["last_sql"]
-    st.session_state["last_guardrails"] = prov_state["last_guardrails"]
-    st.session_state["last_raw"] = prov_state["last_raw"]
-    st.session_state["last_explicacao"] = prov_state["last_explicacao"]
-    st.session_state["last_checks"] = prov_state["last_checks"]
-
-
-question = st.chat_input("Descreva seu pedido em linguagem natural...")
-if question is not None:
-    handle_question(question)
+        # Sync to global state
+        st.session_state["last_cards"] = prov_state["last_cards"]
+        st.session_state["last_sql"] = prov_state["last_sql"]
+        st.session_state["last_guardrails"] = prov_state["last_guardrails"]
+        st.session_state["last_explanation"] = prov_state["last_explanation"]
+        st.session_state["last_checks"] = prov_state["last_checks"]
 
 
-if st.session_state["last_sql"]:
-    st.markdown("---")
-    st.subheader("SQL sugerido e resultado")
-
-    sql_text = st.session_state["last_sql"]
-    guardrails_text = st.session_state.get("last_guardrails", "")
-    explicacao_text = st.session_state.get("last_explicacao", "")
-    checks_text = st.session_state.get("last_checks", "")
-
-    # Usa apenas o bloco de codigo do Streamlit (que ja tem icone de copiar)
-    st.code(sql_text, language="sql")
-
-    st.markdown("**Guardrails (checks de segurança e qualidade)**")
-    st.markdown(guardrails_text or "- Sem violacoes obvias (MVP).")
-
-    if explicacao_text.strip():
+def render_results() -> None:
+    """Render SQL results and retrieved cards."""
+    if st.session_state["last_sql"]:
         st.markdown("---")
-        st.markdown("**Explicação**")
-        st.markdown(explicacao_text)
+        st.subheader("Suggested SQL and Results")
 
-    if checks_text.strip():
-        st.markdown("**Checks (SQL para validação)**")
-        st.code(checks_text, language="sql")
+        # Display SQL
+        st.code(st.session_state["last_sql"], language="sql")
+
+        # Display guardrails
+        st.markdown("**Guardrails (safety and quality checks)**")
+        st.markdown(st.session_state.get("last_guardrails", "- No obvious violations (MVP)."))
+
+        # Display explanation
+        explanation = st.session_state.get("last_explanation", "").strip()
+        if explanation:
+            st.markdown("---")
+            st.markdown("**Explanation**")
+            st.markdown(explanation)
+
+        # Display checks
+        checks = st.session_state.get("last_checks", "").strip()
+        if checks:
+            st.markdown("**Checks (SQL for validation)**")
+            st.code(checks, language="sql")
+
+    # Display retrieved cards
+    if st.session_state["last_cards"]:
+        st.markdown("---")
+        st.subheader("Cards used (RAG)")
+        for card in st.session_state["last_cards"]:
+            card_id = os.path.basename(card.id) if hasattr(card, 'id') else card.get('id', 'unknown')
+            card_score = card.score if hasattr(card, 'score') else card.get('score', 0)
+            card_text = card.text if hasattr(card, 'text') else card.get('text', '')
+
+            with st.expander(f"{card_id} - score={card_score:.2f}"):
+                st.markdown(card_text[:8000])
 
 
-if st.session_state["last_cards"]:
-    st.markdown("---")
-    st.subheader("Cards usados (RAG)")
-    for c in st.session_state["last_cards"]:
-        with st.expander(f"{os.path.basename(c['id'])} - score={c['score']:.2f}"):
-            st.markdown(c["text"][:8000])
+def main() -> None:
+    """Main application entry point."""
+    # Hide Streamlit UI elements
+    hide_st_style = """
+        <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        </style>
+        """
+    st.markdown(hide_st_style, unsafe_allow_html=True)
+
+    # Title
+    st.title("🧠 DBGuide")
+    st.caption("Chat to generate safe SQL using RAG.")
+
+    # Initialize app state
+    app_state = AppState()
+
+    # Render sidebar and get configuration
+    dialect, provider, filter_mode, top_k, alpha = render_sidebar()
+
+    # Sync provider state
+    app_state.sync_provider_state(provider)
+
+    # Display chat history
+    for msg in st.session_state["messages"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Handle user input
+    question = st.chat_input("Describe your request in natural language...")
+    if question:
+        handle_question(
+            question,
+            dialect,
+            provider,
+            filter_mode,
+            top_k,
+            alpha,
+            app_state
+        )
+
+    # Render results
+    render_results()
+
+
+if __name__ == "__main__":
+    main()

@@ -102,6 +102,7 @@ class DocumentLoader:
 def get_all_metadata_keys_and_values(documents: List[Document]) -> dict[str, list]:
     """
     Extract all unique metadata keys and their possible values.
+    Normalizes list values to comma-separated strings to match ChromaDB storage format.
 
     Args:
         documents: List of documents to analyze.
@@ -115,7 +116,12 @@ def get_all_metadata_keys_and_values(documents: List[Document]) -> dict[str, lis
         for key, value in doc.metadata.items():
             if key not in meta_dict:
                 meta_dict[key] = set()
-            meta_dict[key].add(value)
+            # Normalize list values to comma-separated strings (same as during indexing)
+            if isinstance(value, list):
+                normalized_value = ','.join(map(str, value))
+            else:
+                normalized_value = value
+            meta_dict[key].add(normalized_value)
 
     # Convert sets to sorted lists
     return {k: sorted(list(vs)) for k, vs in meta_dict.items()}
